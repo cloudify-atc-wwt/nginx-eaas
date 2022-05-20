@@ -1,0 +1,182 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+description: >
+  This is main blueprint - repo and instance wapper.
+
+imports:
+  - https://cloudify.co/spec/cloudify/6.2.0/types.yaml
+  - plugin:cloudify-ansible-plugin
+  - plugin:cloudify-utilities-plugin?version= >=1.25.3
+  - common/tf-repo.yaml
+
+inputs:
+
+  cloud:
+    type: string
+    default: aws
+    constraints:
+      - valid_values:
+          - aws
+          - gcp
+
+  ttl:
+    type: integer
+    description: |
+      Minutes of time to live after which the environment will be uninstalled
+    default: 4320
+  
+  app_type:
+    type: string
+    description: |
+      Webserver type
+    default: nginx
+    constraints:
+      - valid_values:
+        - nginx
+
+  app_port:
+    type: integer
+    description: |
+      Port to be used in the webserver
+    default: 80
+    constraints:
+      - valid_values:
+        - 80
+        - 8080
+        - 8081
+
+  app_version:
+    type: string
+    description: |
+      Version of the webserver package to be installed
+    default: 1.18.0-0ubuntu1.3
+    constraints:
+      - valid_values:
+        - 1.18.0-0ubuntu1.3
+        - 1.18.0-1~focal
+        - 1.18.0-2~focal
+        - 1.20.0-1~focal
+        - 1.20.1-1~focal
+        - 1.20.2-1~focal
+
+node_types:
+  cloudify.nodes.TTL:
+    derived_from: cloudify.nodes.ApplicationModule
+    properties:
+      ttl:
+        type: integer
+        description: |
+          Minutes of time to live after which the environment will be uninstalled
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        start:
+          implementation: scripts/ttl/enable.py
+          executor: central_deployment_agent
+        stop:
+          implementation: scripts/ttl/disable.py
+          executor: central_deployment_agent
+
+node_templates:
+  agent_key:
+    type: cloudify.keys.nodes.RSAKey
+    properties:
+      resource_config:
+        key_name: cert_key
+        openssh_format: true
+      use_secret_store: true
+      use_secrets_if_exist: true
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: keys.cloudify_ssh_key.operations.create
+          inputs:
+            store_private_key_material: true
+
+  ttl:
+    type: cloudify.nodes.TTL
+    properties:
+      ttl: { get_input: ttl }
+
+  server:
+    type: cloudify.nodes.ServiceComponent
+    properties:
+      resource_config:
+        blueprint:
+          id: { get_secret: [eaas_params, { get_input: cloud }, blueprint] }
+          external_resource: true
+        deployment:
+          id: { get_secret: [eaas_params, { get_input: cloud }, deployment] }
+          inputs:
+            resource_config: { get_secret: [eaas_params, { get_input: cloud }, inputs] }
+            repo_full_name: { get_capability: [ { get_attribute: [tf_repo, deployment, id] }, repo_full_name ] }
+          auto_inc_suffix: true
+    interfaces:
+      terraform:
+        reload:
+          implementation: cfy_extensions.cloudify_types.component.execute_start
+          inputs:
+            resource_config:
+              executions_start_args:
+                parameters:
+                  node_ids: [ vm ]
+                  force: true
+              deployment:
+                id: { get_attribute: [ SELF, deployment, id ] }
+            workflow_id: reload_terraform_template
+
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: agent_key
+      - type: cloudify.relationships.depends_on
+        target: tf_repo
+
+  app:
+    type: cloudify.nodes.ansible.Playbook
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        poststart: {}
+    relationships:
+      - type: cloudify.ansible.relationships.run_on_host
+        target: server
+        source_interfaces:
+          cloudify.interfaces.relationship_lifecycle:
+            establish:
+              inputs:
+                playbook_path: { concat: [ "playbooks", "/", { get_input: app_type }, "/", "site.yaml" ] }
+                sources: &sources
+                  webservers:
+                    hosts:
+                      web:
+                        ansible_host: { get_attribute: [TARGET, capabilities, ip_address] }
+                        ansible_user: ubuntu
+                        ansible_ssh_private_key_file: { get_attribute: [agent_key, private_key_export] }
+                        ansible_become: true
+                        ansible_ssh_common_args: -o StrictHostKeyChecking=no
+                run_data:
+                  message: { get_secret: [eaas_params, { get_input: cloud }, message] }
+                  version: { get_input: app_version }
+                  port: { get_input: app_port }
+            unlink: {}
+
+outputs:
+  server_ips:
+    description: Web server IPs
+    value: { get_attributes_list: [server, capabilities, ip_address] }
+
+  port:
+    description: Application port
+    value: { get_input: app_port }
+
+  tf_repo_url:
+    description: Terraform repository URL
+    value: { get_capability: [ { get_attribute: [tf_repo, deployment, id] }, repo_url ] }
+
+groups:
+  server_and_app:
+    members: [server, app]
+
+
+policies:
+  scaling_policy:
+    type: cloudify.policies.scaling
+    targets: [server_and_app]

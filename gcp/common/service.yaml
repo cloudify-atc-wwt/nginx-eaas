@@ -1,0 +1,45 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+imports:
+  - https://cloudify.co/spec/cloudify/6.2.0/types.yaml
+  - plugin:cloudify-terraform-plugin
+  - plugin:cloudify-ansible-plugin
+
+inputs:
+  vm_tf_url:
+    type: string
+    default:
+      concat:
+        - https://github.com/
+        - { get_input: repo_full_name }
+        - "/archive/refs/heads/master.zip"
+
+node_templates:
+
+  terraform:
+    type: cloudify.nodes.terraform
+
+  vm:
+    type: cloudify.nodes.terraform.Module
+    properties:
+      resource_config:
+        source:
+          location: { get_input: vm_tf_url }
+          username: { get_secret: github_token }
+          password: x-oauth-basic
+        source_path: templates/gcp/vm
+        variables:
+          credentials_json: { get_secret: gcp_credentials_json }
+          project: { get_input: [resource_config, project_id] }
+          zone: { get_input: [resource_config, zone_name] }
+          admin_user: ubuntu
+          admin_key_public: { get_secret: cert_key_public }
+          prefix: { get_input: [resource_config, prefix] }
+          instance_type: { get_input: [resource_config, instance_type] }
+    relationships:
+      - type: cloudify.terraform.relationships.run_on_host
+        target: terraform
+
+capabilities:
+  ip_address:
+    value: { get_attribute: [vm, outputs, ip, value]}

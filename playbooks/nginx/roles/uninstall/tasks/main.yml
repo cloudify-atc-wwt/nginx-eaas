@@ -1,0 +1,11 @@
+---    
+- name: delete app directory
+  file: path=/var/www/app state=absent
+
+- name: delete nginx site.conf
+  file: path=/etc/nginx/sites-available/app state=absent
+
+- name: uninstall nginx
+  apt:
+    name: nginx
+    state: absent

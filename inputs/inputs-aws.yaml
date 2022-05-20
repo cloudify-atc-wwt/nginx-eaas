@@ -1,0 +1,6 @@
+cloud: aws
+env_type: dev
+ttl: 240
+app_type: nginx
+app_port: 8080
+app_version: 1.18.0-0ubuntu1.2

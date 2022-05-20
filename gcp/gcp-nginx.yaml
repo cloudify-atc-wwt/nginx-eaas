@@ -1,0 +1,27 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+description: >
+  Creates an instance in GCP.
+
+imports:
+  - https://cloudify.co/spec/cloudify/6.2.0/types.yaml
+  - common/service.yaml
+
+data_types:
+  resource_config:
+    properties:
+      project_id:
+        type: string
+      zone_name:
+        type: string
+      prefix:
+        type: string
+      instance_type:
+        type: string
+
+inputs:
+  resource_config:
+    type: resource_config
+
+  repo_full_name:
+    type: string

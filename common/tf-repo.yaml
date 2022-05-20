@@ -1,0 +1,25 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+imports:
+  - https://cloudify.co/spec/cloudify/6.2.0/types.yaml
+
+inputs:
+  repo_name:
+    type: string
+    default: wwt-tf
+    description: Terraform repo name prefix
+
+node_templates:
+  tf_repo:
+    type: cloudify.nodes.ServiceComponent
+    properties:
+      resource_config:
+        blueprint:
+          external_resource: true
+          id: terraform-repository
+        deployment:
+          id: terraform-repository
+          auto_inc_suffix: true
+          inputs:
+            app_name: { get_input: repo_name }
+            eaas_deployment_id: { get_sys: [deployment, id] }

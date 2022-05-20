@@ -1,0 +1,8 @@
+- hosts: webservers
+  become: yes
+  roles:
+    - install
+  vars:
+    - message: "{{ message }}"
+    - port: "{{port}}"
+    - version: "{{version}}"
